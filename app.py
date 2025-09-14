@@ -7,6 +7,24 @@ from fastapi import FastAPI, UploadFile, File
 from PIL import Image
 import io
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI(title="Skin Cancer Detection API")
+
+# Allow your frontend (or all origins) to call the API
+origins = [
+    "*",  # allow all domains; you can replace "*" with your frontend URL
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins, 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 # --- Step 1: Model Architecture ---
 num_classes = 7
 base_model = MobileNetV2(
@@ -69,3 +87,4 @@ async def predict(file: UploadFile = File(...)):
         "confidence": round(confidence * 100, 2),
         "risk": risk_mapping[class_indices[pred_class]]
     }
+
