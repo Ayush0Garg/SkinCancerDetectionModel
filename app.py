@@ -3,7 +3,7 @@ from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
 import numpy as np
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
@@ -11,10 +11,12 @@ import io
 # --- Step 1: FastAPI app + CORS ---
 app = FastAPI(title="Skin Cancer Detection API")
 
-# Enable CORS for all origins (use your frontend URL in production)
+# Use your frontend URL in production, e.g., "https://glittery-pothos-3fee6b.netlify.app"
+origins = ["https://glittery-pothos-3fee6b.netlify.app"]  # For testing, allow all origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,7 +39,11 @@ model = Model(inputs=base_model.input, outputs=outputs)
 
 # --- Step 3: Load weights ---
 weights_path = "model_weights.weights.h5"
-model.load_weights(weights_path)
+try:
+    model.load_weights(weights_path)
+    print("Model weights loaded successfully!")
+except Exception as e:
+    print(f"Error loading weights: {e}")
 
 # --- Step 4: Class Labels + Risk ---
 class_indices = {
@@ -63,14 +69,18 @@ risk_mapping = {
 # --- Step 5: Predict endpoint ---
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    img_bytes = await file.read()
-    img = Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((224, 224))
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image.")
 
-    img_array = np.array(img) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+    try:
+        img_bytes = await file.read()
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((224, 224))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not process image: {e}")
 
+    img_array = np.expand_dims(np.array(img) / 255.0, axis=0)
     preds = model.predict(img_array)
-    pred_class = np.argmax(preds, axis=1)[0]
+    pred_class = int(np.argmax(preds, axis=1)[0])
     confidence = float(preds[0][pred_class])
 
     return {
