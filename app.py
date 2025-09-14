@@ -4,28 +4,23 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
 import numpy as np
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
 
-from fastapi.middleware.cors import CORSMiddleware
-
+# --- Step 1: FastAPI app + CORS ---
 app = FastAPI(title="Skin Cancer Detection API")
 
-# Allow your frontend (or all origins) to call the API
-origins = [
-    "*",  # allow all domains; you can replace "*" with your frontend URL
-]
-
+# Enable CORS for all origins (use your frontend URL in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
-# --- Step 1: Model Architecture ---
+# --- Step 2: Model Architecture ---
 num_classes = 7
 base_model = MobileNetV2(
     input_shape=(224, 224, 3),
@@ -40,11 +35,11 @@ x = Dropout(0.3)(x)
 outputs = Dense(num_classes, activation='softmax')(x)
 model = Model(inputs=base_model.input, outputs=outputs)
 
-# --- Step 2: Load Weights ---
+# --- Step 3: Load weights ---
 weights_path = "model_weights.weights.h5"
 model.load_weights(weights_path)
 
-# --- Step 3: Class Labels + Risk ---
+# --- Step 4: Class Labels + Risk ---
 class_indices = {
     0: 'Melanocytic nevi (NV)',
     1: 'Melanoma (MEL)',
@@ -65,19 +60,15 @@ risk_mapping = {
     'Dermatofibroma (DF)': 'Benign, not cancerous'
 }
 
-# --- Step 4: FastAPI App ---
-app = FastAPI(title="Skin Cancer Detection API")
-
+# --- Step 5: Predict endpoint ---
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     img_bytes = await file.read()
     img = Image.open(io.BytesIO(img_bytes)).convert("RGB").resize((224, 224))
 
-    # Preprocess
     img_array = np.array(img) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
 
-    # Predict
     preds = model.predict(img_array)
     pred_class = np.argmax(preds, axis=1)[0]
     confidence = float(preds[0][pred_class])
@@ -87,4 +78,3 @@ async def predict(file: UploadFile = File(...)):
         "confidence": round(confidence * 100, 2),
         "risk": risk_mapping[class_indices[pred_class]]
     }
-
