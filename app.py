@@ -1,5 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras.applications import MobileNetV2
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input, decode_predictions
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
 import numpy as np
@@ -11,8 +12,8 @@ import io
 # --- Step 1: FastAPI app + CORS ---
 app = FastAPI(title="Skin Cancer Detection API")
 
-# Use your frontend URL in production, e.g., "https://glittery-pothos-3fee6b.netlify.app"
-origins = ["https://glittery-pothos-3fee6b.netlify.app"]  # For testing, allow all origins
+# Use your frontend URL in production
+origins = ["https://glittery-pothos-3fee6b.netlify.app"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,30 +23,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Step 2: Model Architecture ---
+# --- Step 2: Skin Cancer Model ---
 num_classes = 7
-base_model = MobileNetV2(
-    input_shape=(224, 224, 3),
-    include_top=False,
-    weights='imagenet'
-)
+base_model = MobileNetV2(input_shape=(224,224,3), include_top=False, weights='imagenet')
 base_model.trainable = False
-
 x = base_model.output
 x = GlobalAveragePooling2D()(x)
 x = Dropout(0.3)(x)
 outputs = Dense(num_classes, activation='softmax')(x)
 model = Model(inputs=base_model.input, outputs=outputs)
 
-# --- Step 3: Load weights ---
+# Load weights
 weights_path = "model_weights.weights.h5"
 try:
     model.load_weights(weights_path)
-    print("Model weights loaded successfully!")
+    print("Skin cancer model weights loaded successfully!")
 except Exception as e:
-    print(f"Error loading weights: {e}")
+    print(f"Error loading skin cancer model weights: {e}")
 
-# --- Step 4: Class Labels + Risk ---
+# --- Step 3: Class Labels + Risk ---
 class_indices = {
     0: 'Melanocytic nevi (NV)',
     1: 'Melanoma (MEL)',
@@ -66,6 +62,10 @@ risk_mapping = {
     'Dermatofibroma (DF)': 'Benign, not cancerous'
 }
 
+# --- Step 4: Pretrained ImageNet Model for Skin Check ---
+skin_check_model = MobileNetV2(weights='imagenet')
+skin_related_keywords = ['hand', 'arm', 'leg', 'face', 'torso', 'person', 'human']
+
 # --- Step 5: Predict endpoint ---
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
@@ -78,6 +78,17 @@ async def predict(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not process image: {e}")
 
+    # --- Step 5a: Check if image contains human skin/body ---
+    img_array_check = np.expand_dims(np.array(img), axis=0)
+    img_array_check = preprocess_input(img_array_check)
+    preds_check = skin_check_model.predict(img_array_check)
+    top_preds = decode_predictions(preds_check, top=3)[0]
+    is_skin = any(any(keyword in pred[1].lower() for keyword in skin_related_keywords) for pred in top_preds)
+    
+    if not is_skin:
+        return {"class": "Not human skin detected", "confidence": 0, "risk": "N/A"}
+
+    # --- Step 5b: Skin cancer prediction ---
     img_array = np.expand_dims(np.array(img) / 255.0, axis=0)
     preds = model.predict(img_array)
     pred_class = int(np.argmax(preds, axis=1)[0])
